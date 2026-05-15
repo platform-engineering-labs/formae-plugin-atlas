@@ -1,0 +1,50 @@
+/*
+ * Basic atlas plugin example.
+ *
+ * Demonstrates a single migration resource against a local Postgres.
+ * Adjust host/port/credentials to match your environment. For
+ * production, the host/port typically come from a Resolvable pointing
+ * at an AWS::RDS::DBCluster (or equivalent) — see README §"Hub example".
+ *
+ * Run with:
+ *   formae apply --mode reconcile examples/basic/main.pkl
+ */
+amends "@formae/forma.pkl"
+
+import "@formae/formae.pkl"
+import "@atlas/atlas.pkl"
+import "@atlas/schema/migration.pkl"
+
+local atlasStack = new formae.Stack {
+  label = "atlas-example"
+  description = "Example stack for the atlas plugin"
+}
+
+local hubDb = new formae.Target {
+  label = "example-hub-db"
+  namespace = "ATLAS"
+  config = new atlas.Config {
+    dialect  = "postgres"
+    host     = "localhost"
+    port     = 5432
+    database = "hub"
+    sslMode  = "disable"
+    credentials = new atlas.UsernamePasswordCredentials {
+      username = "postgres"
+      password = "postgres"
+    }
+  }
+}
+
+forma {
+  atlasStack
+  hubDb
+  new migration.Migration {
+    stack          = atlasStack.res
+    label          = "hub-schema"
+    target         = hubDb.res
+    migrationsUri  = "file:///path/to/your/migrations"
+    targetVersion  = "latest"
+    allowDowngrade = false
+  }
+}

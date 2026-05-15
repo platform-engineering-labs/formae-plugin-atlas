@@ -1,0 +1,50 @@
+/*
+ * © 2025 Platform Engineering Labs Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/// Plugin configuration.
+/// Customize this with plugin-specific settings that users can set in formae.conf.pkl.
+///
+/// Users import this via: import "plugins:/Atlas.pkl" as Atlas
+///
+/// Then use it in their formae.conf.pkl:
+///   agent {
+///       resourcePlugins {
+///           new Atlas.PluginConfig {
+///               rateLimit { maxRequestsPerSecond = 5 }
+///           }
+///       }
+///   }
+open module atlas.Config
+
+extends "formae:/Config.pkl"
+
+class PluginConfig extends BaseResourcePluginConfig {
+    type = "atlas"
+
+    /// How Delete handles the target database. The chosen mode also
+    /// affects Create/Update: any mode other than `retain` implies the
+    /// plugin tolerates re-applying migrations against a DB whose user
+    /// schema persists (AllowDirty=true to atlas — see the README's
+    /// "Plugin lifecycle" section for the full coupling).
+    ///
+    /// - `retain` (default, prod-safe): Delete is a no-op.
+    ///   `atlas_schema_revisions` and user data are preserved. Matches
+    ///   the Atlas Terraform provider's `atlas_migration` behavior.
+    ///   The right choice for any DB whose data outlives the resource's
+    ///   formae management.
+    /// - `dropRevisions`: Delete drops atlas's `atlas_schema_revisions`
+    ///   schema (its bookkeeping). The user's migrated schema and data
+    ///   are NOT touched. Use only for ephemeral test/dev DBs and the
+    ///   conformance harness. A subsequent Create needs either
+    ///   idempotent migrations (CREATE TABLE IF NOT EXISTS, ...) or an
+    ///   `atlas migrate baseline <version>` step to realign atlas's
+    ///   cursor with the still-present user schema.
+    ///
+    /// Future modes (e.g. `rollback` to run `atlas migrate down` to 0,
+    /// or `dropDatabase` for full clean-slate) will land as additional
+    /// enum variants without breaking existing configs.
+    deleteMode: ("retain" | "dropRevisions") = "retain"
+}

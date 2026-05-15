@@ -1,0 +1,16 @@
+amends "pkl:Project"
+
+// Package configuration for local development.
+// Update baseUri and packageZipUrl when publishing to a registry.
+package {
+  name = "atlas"
+  baseUri = "package://hub.platform.engineering/plugins/atlas/schema/pkl/\(name)/\(name)"
+  version = read("VERSION").text.trim()
+  packageZipUrl = "https://hub.platform.engineering/plugins/atlas/schema/pkl/\(name)/\(name)@\(version).zip"
+}
+
+dependencies {
+  ["formae"] {
+    uri = "package://hub.platform.engineering/plugins/pkl/schema/pkl/formae/formae@0.84.0"
+  }
+}

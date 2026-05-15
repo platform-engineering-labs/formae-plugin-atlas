@@ -1,0 +1,54 @@
+/*
+ * Conformance Test: ATLAS::Schema::Migration — base state
+ *
+ * Initial fixture. The clean-environment.sh hook ensures a Postgres
+ * container is running on 127.0.0.1:5499 before the harness applies
+ * this file.
+ *
+ * The migration artifact lives under testdata/migrations/v1/ and is
+ * referenced via a file:// URI. FORMAE_PLUGIN_ROOT is set by the
+ * conformance harness to the plugin's repo root.
+ */
+amends "@formae/forma.pkl"
+
+import "@formae/formae.pkl"
+import "@atlas/atlas.pkl"
+import "@atlas/schema/migration.pkl"
+
+local stackName = "plugin-sdk-test-stack"
+local testRunID = read("env:FORMAE_TEST_RUN_ID")
+local pluginRoot = read?("env:FORMAE_PLUGIN_ROOT") ?? read("env:PWD")
+
+local atlasStack = new formae.Stack {
+  label = stackName
+  description = "Atlas plugin conformance test stack"
+}
+
+local atlasTarget = new formae.Target {
+  label = "atlas-conformance-target"
+  namespace = "ATLAS"
+  config = new atlas.Config {
+    dialect  = "postgres"
+    host     = "127.0.0.1"
+    port     = 5499
+    database = "conformance"
+    sslMode  = "disable"
+    credentials = new atlas.UsernamePasswordCredentials {
+      username = "postgres"
+      password = "conformance"
+    }
+  }
+}
+
+forma {
+  atlasStack
+  atlasTarget
+  new migration.Migration {
+    stack         = atlasStack.res
+    label         = "atlas-conformance-mig-\(testRunID)"
+    target        = atlasTarget.res
+    migrationsUri = "file://\(pluginRoot)/testdata/migrations/v1"
+    targetVersion = "latest"
+    allowDowngrade = false
+  }
+}

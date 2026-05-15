@@ -1,0 +1,42 @@
+# Binaries
+bin/
+dist/
+*.so
+*.exe
+
+# Stray go-test artifact: `go test ./...` builds a test binary named after
+# the directory (formae-plugin-atlas) at the repo root.
+/formae-plugin-atlas
+
+# Atlas CLI installed by scripts/install-atlas.sh
+tools/
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage.out
+coverage.html
+
+# GoReleaser
+dist/
+
+# Pkl
+.pkl-cache/
+*.pkl-expected.pcf
+PklProject.deps.json
+schema/pkl/VERSION
+
+# Claude Code
+CLAUDE.md
+.claude/

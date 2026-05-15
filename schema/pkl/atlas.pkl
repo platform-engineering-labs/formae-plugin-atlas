@@ -1,0 +1,123 @@
+/*
+ * © 2026 Platform Engineering Labs Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/// Atlas plugin schema root.
+///
+/// Defines the Target configuration and credential strategies for
+/// Atlas-managed databases. Migration resources reference a Target
+/// (via their inherited `target` field); the Target Config carries
+/// the connection details that the plugin uses to reach the DB.
+module atlas
+
+import "@formae/formae.pkl"
+
+// =============================================================================
+// Annotation aliases
+// =============================================================================
+
+typealias ResourceHint = formae.ResourceHint
+typealias FieldHint = formae.FieldHint
+typealias ConfigFieldHint = formae.ConfigFieldHint
+typealias SubResourceHint = formae.SubResourceHint
+
+// =============================================================================
+// Target Configuration
+// =============================================================================
+
+/// Configuration for an Atlas-managed database target.
+///
+/// Holds the connection details the plugin needs to reach the database.
+/// Typically wired up with Resolvables from cloud database resources
+/// (AWS::RDS::DBCluster, future Azure::DB::*, etc.) so the Target sits
+/// at the boundary between the upstream cloud plugin and Atlas.
+open class Config {
+    /// SQL dialect. v1 supports postgres only; field reserved for future
+    /// MySQL / SQL Server expansion without schema breakage.
+    /// (Immutable — changing dialect implies a different DB target.)
+    @ConfigFieldHint { createOnly = true }
+    dialect: ("postgres")? = "postgres"
+
+    /// Network host. Typically a Resolvable from
+    /// `AWS::RDS::DBCluster.res.endpointAddress`.
+    /// (Immutable — pointing at a different host is a different DB.)
+    @ConfigFieldHint { createOnly = true }
+    host: (String|formae.Resolvable)?
+
+    /// Network port. Typically a Resolvable from
+    /// `AWS::RDS::DBCluster.res.endpointPort`. Mutable so that the
+    /// upstream cluster can change its listener without forcing a
+    /// migration-resource replace.
+    @ConfigFieldHint { createOnly = false }
+    port: (Int|formae.Resolvable)?
+
+    /// Database name (postgres database, mysql schema, etc.).
+    /// (Immutable — switching DBs is a different target.)
+    @ConfigFieldHint { createOnly = true }
+    database: String?
+
+    /// Authentication credentials. See the `Credentials` subclasses for
+    /// the supported shapes. Mutable to support credential rotation.
+    @ConfigFieldHint { createOnly = false }
+    credentials: Credentials?
+
+    /// SSL/TLS mode. Aurora best practice is `verify-ca`; `verify-full`
+    /// requires a known server hostname in the cert. Mutable.
+    @ConfigFieldHint { createOnly = false }
+    sslMode: ("disable" | "require" | "verify-ca" | "verify-full")? = "verify-ca"
+
+    /// Escape hatch: pre-composed connection string. When set, takes
+    /// precedence over the structured fields above. For non-cloud DBs,
+    /// sqlite, or ad-hoc connections that don't fit the structured model.
+    /// Mutable — same rationale as `credentials`.
+    @ConfigFieldHint { createOnly = false }
+    connectionString: (String|formae.Resolvable)?
+}
+
+// =============================================================================
+// Credential Strategies
+// =============================================================================
+
+/// Discriminator base for credential shapes. The plugin's Go side
+/// unmarshals into the concrete struct using `type` as the type-switch
+/// key. Currently three shapes are supported; new variants land as new
+/// subclasses (e.g. Azure managed identity, GCP IAM auth) without
+/// touching the Config class.
+abstract class Credentials {
+    fixed type: String
+}
+
+/// RDS-managed master secret. The plugin extracts username + password
+/// from the standardized AWS JSON shape:
+/// `{"username":"...", "password":"...", "host":"...", "port":5432,...}`.
+/// Other fields in the secret payload are ignored.
+class AwsRdsMasterCredentials extends Credentials {
+    fixed type = "AwsRdsMaster"
+
+    /// Reference to the secret payload (the entire `secretString`).
+    /// Typically: `hubDbMasterSecret.res.secretString`
+    secret: String|formae.Resolvable
+}
+
+/// Hand-rolled JSON secret with shape:
+/// `{"username":"...", "password":"..."}`.
+/// Use for secrets you manage outside RDS's master-secret rotation.
+class UsernamePasswordJsonCredentials extends Credentials {
+    fixed type = "UsernamePasswordJson"
+
+    secret: String|formae.Resolvable
+}
+
+/// Separate username + password fields. Useful when neither value
+/// comes from a JSON-shaped secret (env vars, config files, etc.).
+/// Also the right shape for when `SecretResolvable.field(...)` lands
+/// in the AWS plugin — at that point users can wire individual fields
+/// directly instead of routing through a parsed JSON blob.
+class UsernamePasswordCredentials extends Credentials {
+    fixed type = "UsernamePassword"
+
+    username: String|formae.Resolvable
+    password: String|formae.Resolvable
+}

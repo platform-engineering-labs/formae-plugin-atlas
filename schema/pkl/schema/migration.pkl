@@ -1,0 +1,96 @@
+/*
+ * © 2026 Platform Engineering Labs Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/// Atlas schema migration resource.
+///
+/// Models a one-shot, completion-bearing operation: ensure the
+/// connected database is migrated up to (or, with `allowDowngrade`,
+/// back down to) `targetVersion`. The desired-state field is the
+/// target version; the Read operation queries `atlas_schema_revisions`
+/// for the currently applied version; Create/Update run migrations
+/// to bridge the gap.
+///
+/// Downstream resources gate themselves on migration completion by
+/// referencing `migration.res.appliedVersion` in any String|Resolvable
+/// field (env vars, labels, tags). The DAG edge it creates is the
+/// actual ordering product; the value is informational.
+module atlas.schema.migration
+
+import "@formae/formae.pkl"
+import "../atlas.pkl" as atlas
+
+const type = "ATLAS::Schema::Migration"
+
+open class MigrationResolvable extends formae.Resolvable {
+    type = module.type
+
+    hidden appliedVersion: MigrationResolvable = (this) { property = "appliedVersion" }
+    hidden baseline: MigrationResolvable = (this) { property = "baseline" }
+}
+
+@formae.ResourceHint {
+    type = module.type
+    identifier = "Label"
+}
+open class Migration extends formae.Resource {
+    // `target: TargetResolvable?` is inherited from formae.Resource.
+
+    /// Where the migration files live. Supported schemes:
+    ///   - `oci://`           — OCI artifact (recommended; same registry as your app image)
+    ///   - `s3://`            — S3 bucket
+    ///   - `git+https://`     — Git repository
+    ///   - `file://`          — local filesystem (development only)
+    @atlas.FieldHint { createOnly = true }
+    migrationsUri: String
+
+    /// Target migration version. Two forms:
+    ///   - `"latest"`              — apply everything currently in the artifact
+    ///   - `"20240101120000"`      — pin to a specific Atlas version timestamp
+    ///
+    /// Going from `applied=47` to `targetVersion=42` is a downgrade and
+    /// errors unless `allowDowngrade=true`.
+    @atlas.FieldHint {}
+    targetVersion: String
+
+    /// Schema in which Atlas's revisions tracking table lives. Atlas
+    /// defaults to `atlas_schema_revisions` in the connecting role's
+    /// default schema; override for environments where bookkeeping
+    /// belongs in a dedicated schema.
+    @atlas.FieldHint { hasProviderDefault = true }
+    revisionsSchema: String?
+
+    /// Explicit gate for destructive operations. When false (default),
+    /// reconcile errors on downgrade requests with a clear message
+    /// naming the current and requested versions. Set to true to allow
+    /// `atlas migrate down` runs.
+    @atlas.FieldHint {}
+    allowDowngrade: Boolean = false
+
+    /// Migration tool. v1 supports atlas only; field reserved for
+    /// future flyway / sqitch / liquibase / alembic without schema
+    /// breakage.
+    @atlas.FieldHint { createOnly = true; hasProviderDefault = true }
+    tool: ("atlas")? = "atlas"
+
+    // ── Computed outputs (populated by Read) ─────────────────────────
+
+    /// Currently applied version on the target DB. Empty string if no
+    /// migrations have been applied yet (revisions table missing).
+    @atlas.FieldHint { hasProviderDefault = true }
+    appliedVersion: String?
+
+    /// Baseline checksum — sha256 of the revisions-table state.
+    /// Useful for detecting tampering with already-applied migration
+    /// files.
+    @atlas.FieldHint { hasProviderDefault = true }
+    baseline: String?
+
+    local parent = this
+    hidden res: MigrationResolvable = new {
+        label = parent.label
+        stack = parent.stack?.label
+    }
+}
