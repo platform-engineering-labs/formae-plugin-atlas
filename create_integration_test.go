@@ -41,9 +41,12 @@ func TestCreate_AppliesMigrations(t *testing.T) {
 		t.Fatalf("status: got %q, want Success; message: %q",
 			result.ProgressResult.OperationStatus, result.ProgressResult.StatusMessage)
 	}
-	if result.ProgressResult.NativeID != "test-mig" {
-		t.Errorf("NativeID: got %q, want %q (the resource Label)",
-			result.ProgressResult.NativeID, "test-mig")
+	// NativeID is synthesized from the Target's DB coordinates so it
+	// matches what discovery would surface, not the user-supplied Label.
+	wantNative := nativeIDFromConfig(&Config{Dialect: "postgres", Host: pg.Host, Port: pg.Port, Database: pg.Database})
+	if result.ProgressResult.NativeID != wantNative {
+		t.Errorf("NativeID: got %q, want %q (DSN-shaped synthetic)",
+			result.ProgressResult.NativeID, wantNative)
 	}
 
 	// Assert the DB actually has the schema + revisions row.

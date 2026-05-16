@@ -33,18 +33,37 @@ open class MigrationResolvable extends formae.Resolvable {
 
 @formae.ResourceHint {
     type = module.type
+    // The NativeID is synthesized by the plugin from the Target's
+    // connection coordinates: `<dialect>://<host>:<port>/<database>`.
+    // The user's Label is a display handle, not an identity — two
+    // Migration resources referencing the same Target collapse to one
+    // logical entity (atlas's revisions table is per-DB).
+    //
+    // `Label` here means: formae's identifier-extraction falls back to
+    // the resource Label for resolvable-target rendering; the plugin's
+    // returned NativeID supersedes it at agent-side bookkeeping.
     identifier = "Label"
 }
 open class Migration extends formae.Resource {
     // `target: TargetResolvable?` is inherited from formae.Resource.
 
     /// Where the migration files live. Supported schemes:
-    ///   - `oci://`           — OCI artifact (recommended; same registry as your app image)
+    ///   - `oci://`           — OCI artifact (same registry as your app image)
     ///   - `s3://`            — S3 bucket
-    ///   - `git+https://`     — Git repository
+    ///   - `git+https://`     — Git repository (recommended for infra-as-code)
     ///   - `file://`          — local filesystem (development only)
+    ///
+    /// Accepts a Resolvable so the artifact location can reference
+    /// another formae-managed resource (e.g. an `AWS::S3::Bucket` that
+    /// the operator publishes migrations to via their release pipeline).
+    /// Plain strings remain the common case for git+https:// and oci://.
+    ///
+    /// Type is nullable so discovery can surface a Migration resource
+    /// with `migrationsUri` unknown — atlas's revisions table records
+    /// versions but not source URIs. The plugin enforces non-empty at
+    /// Create/Update time. See README §"Discovery & adoption".
     @atlas.FieldHint { createOnly = true }
-    migrationsUri: String
+    migrationsUri: (String|formae.Resolvable)?
 
     /// Target migration version. Two forms:
     ///   - `"latest"`              — apply everything currently in the artifact
@@ -52,8 +71,15 @@ open class Migration extends formae.Resource {
     ///
     /// Going from `applied=47` to `targetVersion=42` is a downgrade and
     /// errors unless `allowDowngrade=true`.
+    ///
+    /// Type is nullable so Read can omit it for managed resources (the
+    /// user's intent — e.g. "latest" — lives in formae's stored state
+    /// and shouldn't be overwritten by Read's observed `appliedVersion`)
+    /// AND for discovered resources where we can only report what's
+    /// applied, not the operator's target intent. The plugin enforces
+    /// non-empty at Create/Update time.
     @atlas.FieldHint {}
-    targetVersion: String
+    targetVersion: String?
 
     /// Schema in which Atlas's revisions tracking table lives. Atlas
     /// defaults to `atlas_schema_revisions` in the connecting role's

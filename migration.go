@@ -25,11 +25,19 @@ import (
 // MigrationProperties mirrors the ATLAS::Schema::Migration PKL resource
 // fields. Input fields echo back unchanged; output fields (AppliedVersion,
 // Baseline) are populated by Create/Read by querying the target DB.
+//
+// `AllowDowngrade` is the only required-by-validator field that has a
+// meaningful zero value (false). It drops `omitempty` so the marshalled
+// output always carries it. `MigrationsUri` and `TargetVersion` are
+// nullable in PKL (Read can omit them for both discovered and managed
+// resources without forcing drift) and the plugin enforces non-empty
+// at Create/Update time. See README §"Discovery & adoption" for the
+// adoption flow.
 type MigrationProperties struct {
 	MigrationsUri   string  `json:"migrationsUri,omitempty"`
 	TargetVersion   string  `json:"targetVersion,omitempty"`
 	RevisionsSchema *string `json:"revisionsSchema,omitempty"`
-	AllowDowngrade  bool    `json:"allowDowngrade,omitempty"`
+	AllowDowngrade  bool    `json:"allowDowngrade"`
 	Tool            string  `json:"tool,omitempty"`
 
 	// Computed outputs.
@@ -86,7 +94,7 @@ func (p *Plugin) createMigration(ctx context.Context, req *resource.CreateReques
 	return &resource.ProgressResult{
 		Operation:          resource.OperationCreate,
 		OperationStatus:    resource.OperationStatusSuccess,
-		NativeID:           req.Label,
+		NativeID:           nativeIDFromConfig(cfg),
 		ResourceProperties: outRaw,
 	}
 }
@@ -424,7 +432,7 @@ func (p *Plugin) updateMigration(ctx context.Context, req *resource.UpdateReques
 	return &resource.ProgressResult{
 		Operation:          resource.OperationUpdate,
 		OperationStatus:    resource.OperationStatusSuccess,
-		NativeID:           req.NativeID,
+		NativeID:           nativeIDFromConfig(cfg),
 		ResourceProperties: outRaw,
 	}
 }
@@ -459,6 +467,73 @@ func runAtlasMigrateDown(ctx context.Context, connURL string, props *MigrationPr
 	}
 	_, err = client.MigrateDown(ctx, params)
 	return err
+}
+
+// =============================================================================
+// List — surface atlas-managed migrations for discovery
+// =============================================================================
+
+// listMigrations probes the target DB for an `atlas_schema_revisions`
+// schema. If present, the Target has an atlas-tracked migration and we
+// return a single synthetic NativeID derived from the DB connection
+// coordinates. If absent, the Target either has no migrations or is
+// managed by a different tool (flyway/sqitch) — neither concerns this
+// plugin.
+func (p *Plugin) listMigrations(ctx context.Context, req *resource.ListRequest) (*resource.ListResult, error) {
+	cfg, err := ParseConfig(req.TargetConfig)
+	if err != nil {
+		return nil, fmt.Errorf("list: %w", err)
+	}
+	var creds Credentials
+	if len(cfg.Credentials) > 0 {
+		creds, err = ParseCredentials(cfg.Credentials)
+		if err != nil {
+			return nil, fmt.Errorf("list credentials: %w", err)
+		}
+	}
+	connURL, err := BuildConnectionURL(cfg, creds)
+	if err != nil {
+		return nil, fmt.Errorf("list connection url: %w", err)
+	}
+
+	state, err := readMigrationState(ctx, connURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("list revisions probe: %w", err)
+	}
+	if !state.TableExists {
+		return &resource.ListResult{NativeIDs: []string{}}, nil
+	}
+
+	return &resource.ListResult{NativeIDs: []string{nativeIDFromConfig(cfg)}}, nil
+}
+
+// nativeIDFromConfig returns a stable, observable-from-TargetConfig
+// identifier for a Migration. The "identity" of a migration resource is
+// the DB it operates on — host:port/database fully specifies that.
+// Both Create and List derive from the same data so discovery's
+// NativeID round-trip works without any plugin-side label persistence.
+//
+// Form: postgres://<host>:<port>/<database> (DSN-shaped, sans credentials).
+// Reads as the actual connection URL the operator pointed at, so
+// `formae inventory | grep <host>` works.
+func nativeIDFromConfig(cfg *Config) string {
+	host := cfg.Host
+	if host == "" {
+		host = "unknown"
+	}
+	port := cfg.Port
+	if port == 0 {
+		port = 5432
+	}
+	db := cfg.Database
+	if db == "" {
+		db = "unknown"
+	}
+	dialect := cfg.Dialect
+	if dialect == "" {
+		dialect = "postgres"
+	}
+	return fmt.Sprintf("%s://%s:%d/%s", dialect, host, port, db)
 }
 
 // =============================================================================
@@ -587,7 +662,14 @@ func (p *Plugin) readMigration(ctx context.Context, req *resource.ReadRequest) *
 		}
 	}
 
+	// Return only observable state so Sync's diff doesn't trigger a
+	// phantom change for managed resources (e.g. user declared
+	// targetVersion="latest", Read returning the literal applied
+	// version would look like drift). For discovered resources, the
+	// caller treats the absent inputs as operator-fillable on adopt.
 	out := MigrationProperties{
+		AllowDowngrade: false,
+		Tool:           "atlas",
 		AppliedVersion: state.AppliedVersion,
 	}
 	raw, _ := json.Marshal(out)

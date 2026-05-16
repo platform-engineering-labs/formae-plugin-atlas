@@ -100,8 +100,8 @@ hubMigration = new migration.Migration {
 
 | Field | Mutability | Notes |
 |-------|-----------|-------|
-| `migrationsUri` | createOnly | Migration artifact location. `file://` for local-dev; `oci://`, `s3://`, `git+https://` per atlas's native support. |
-| `targetVersion` | mutable | `"latest"` or a pinned atlas version (e.g. `"20240101120000"`). |
+| `migrationsUri` | createOnly | Migration artifact location. `file://` for local-dev; `oci://`, `s3://`, `git+https://` per atlas's native support. Accepts a Resolvable so the artifact location can reference another formae-managed resource (e.g. an `AWS::S3::Bucket` whose contents your release pipeline uploads). Nullable in schema for discovery's sake — the plugin enforces non-empty at Create/Update time. |
+| `targetVersion` | mutable | `"latest"` or a pinned atlas version (e.g. `"20240101120000"`). Nullable in schema so Read doesn't overwrite the operator's intent during sync — the plugin enforces non-empty at Create/Update time. |
 | `revisionsSchema` | mutable | DB schema for atlas's bookkeeping table. Defaults to `atlas_schema_revisions`. |
 | `allowDowngrade` | mutable | When false (default), reconcile errors on requests to lower the applied version. |
 | `tool` | createOnly | Reserved for future flyway/sqitch/liquibase support; v1 = atlas only. |
@@ -155,6 +155,58 @@ parallel with it. For services sharing the DB, the canonical pattern
 is the env-var injection shown above. A label / tag / container
 metadata key works just as well — the DAG cares about the dependency
 edge, not the semantic meaning of the value.
+
+## Discovery & adoption
+
+Atlas Targets are discoverable by default. On each discovery cycle the
+plugin probes the Target's database for an `atlas_schema_revisions`
+schema; if found, it reports a single unmanaged `Migration` resource
+with NativeID `<database>-migration`. If absent (empty DB, or a DB
+managed by Flyway/Liquibase/Sqitch — a different plugin's concern), the
+Target produces no discoveries.
+
+### What the discovered resource knows
+
+| Property | Source |
+|---|---|
+| `appliedVersion`, `baseline` | atlas's revisions table |
+| `revisionsSchema` | `information_schema` lookup |
+| `targetVersion` | = `appliedVersion` at discovery time (current state is the desired state until you bump it) |
+| `tool` | `"atlas"` (everything we surface is by definition atlas-tracked) |
+| `allowDowngrade` | plugin default (`false`) |
+| `migrationsUri` | **not recoverable from the DB** — atlas's revisions table doesn't store the source URI; left absent in the discovered resource |
+
+### Adopting a discovered resource
+
+Write a `Migration` resource whose `label` matches the discovered
+NativeID and supply the artifact location you manage:
+
+```pkl
+new migration.Migration {
+    stack          = appStack.res
+    label          = "hub-migration"          // matches discovered NativeID
+    target         = hubDbTarget.res
+    migrationsUri  = "git+https://github.com/myorg/hub.git//migrations"
+    targetVersion  = "latest"
+}
+```
+
+The agent matches by label, switches the resource from unmanaged →
+managed, and subsequent reconciles use the supplied `migrationsUri`.
+
+### Why `migrationsUri` is operator-supplied
+
+The DB only knows that migration version X was applied — not where the
+SQL files came from. Different operators store their migrations in
+different places (git, OCI, S3, …) and atlas itself doesn't persist the
+source URI anywhere. The discovered resource is a "9/10 stub" by design;
+the operator filling in `migrationsUri` is also where they confirm
+"yes, these are MY migrations on this DB" rather than someone else's
+atlas project pointing at the same database.
+
+For artifact locations managed by formae (e.g. an `AWS::S3::Bucket`
+that your release pipeline uploads to), `migrationsUri` accepts a
+Resolvable so the dependency edge gets wired into the DAG normally.
 
 ## Lifecycle semantics
 
@@ -234,15 +286,10 @@ formae apply --mode reconcile examples/basic/main.pkl
 ## Known limitations
 
 - **Postgres only.** `dialect` accepts `"postgres"` exclusively in v1.
-- **No discovery.** Atlas Targets default to `discoverable = false`.
-  Migrations are declared, not discovered.
 - **No full destructive rollback.** The opt-in destructive Delete mode
   drops atlas's bookkeeping only, not user data. `atlas migrate down`
   to 0 as part of Delete is on the roadmap for ephemeral test/dev DBs
   that want a true clean slate.
-- **Bundled execution only.** The plugin shells out to `atlas` in the
-  agent's process context. Scheduler-based execution (ECS RunTask,
-  K8s Job) is on the roadmap if a real use case surfaces.
 
 ## License
 

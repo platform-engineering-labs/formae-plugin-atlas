@@ -211,14 +211,19 @@ func (p *Plugin) Status(ctx context.Context, req *resource.StatusRequest) (*reso
 	}, nil
 }
 
-// List enumerates resources of a given type for discovery. Atlas
-// migrations are declared, not discovered (Targets default to
-// discoverable=false in v1 — see DiscoveryFilters). The plugin
-// returns an empty list so the discovery harness gets a well-formed
-// no-op response.
+// List enumerates ATLAS::Schema::Migration resources visible on a given
+// Target. Atlas's revisions table is per-DB, so a Target either has
+// exactly one Migration (revisions schema present, atlas-managed
+// migrations have been applied) or none (empty DB, or schema managed
+// by a different tool — flyway/sqitch — which is a different plugin's
+// concern).
+//
+// The discovered NativeID is `<database>-migration` so multiple Atlas
+// Targets pointing at different databases produce distinct inventory
+// entries. The user adopts a discovered Migration by writing a PKL
+// `migration.Migration` whose `label` matches the discovered NativeID
+// and supplying the artifact location they manage — see README's
+// "Discovery & adoption" section for the workflow.
 func (p *Plugin) List(ctx context.Context, req *resource.ListRequest) (*resource.ListResult, error) {
-	return &resource.ListResult{
-		NativeIDs:     []string{},
-		NextPageToken: nil,
-	}, nil
+	return p.listMigrations(ctx, req)
 }
