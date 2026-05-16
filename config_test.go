@@ -231,6 +231,89 @@ func TestBuildConnectionURL_UnsupportedDialect(t *testing.T) {
 }
 
 // =============================================================================
+// nativeIDFromConfig
+// =============================================================================
+
+func TestNativeIDFromConfig_StructuredFields_DropsPort(t *testing.T) {
+	// Port deliberately excluded from identity — it's a mutable field
+	// and pulling it in would force a resource replace on every
+	// listener move.
+	got, err := nativeIDFromConfig(&Config{
+		Dialect:  "postgres",
+		Host:     "db.example.com",
+		Port:     5432,
+		Database: "hub",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "postgres://db.example.com/hub"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	// Same Config with a different port must produce the same ID.
+	got2, err := nativeIDFromConfig(&Config{
+		Dialect: "postgres", Host: "db.example.com", Port: 6543, Database: "hub",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got2 != got {
+		t.Errorf("identity not stable across port changes: got %q vs %q", got, got2)
+	}
+}
+
+func TestNativeIDFromConfig_ConnectionString_Parses(t *testing.T) {
+	got, err := nativeIDFromConfig(&Config{
+		ConnectionString: "postgres://user:secret@db.example.com:5432/hub?sslmode=verify-ca",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "postgres://db.example.com/hub"
+	if got != want {
+		t.Errorf("got %q, want %q (query params, port, and credentials must be stripped)", got, want)
+	}
+}
+
+func TestNativeIDFromConfig_ConnectionString_TakesPrecedence(t *testing.T) {
+	// When both ConnectionString and structured fields are set, the
+	// ConnectionString wins — it's the canonical operator-declared form.
+	got, err := nativeIDFromConfig(&Config{
+		Host:             "ignored.example.com",
+		Database:         "ignored",
+		ConnectionString: "postgres://db.example.com/hub",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "postgres://db.example.com/hub" {
+		t.Errorf("ConnectionString should win, got %q", got)
+	}
+}
+
+func TestNativeIDFromConfig_MissingEssentials_Errors(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *Config
+	}{
+		{"empty config", &Config{}},
+		{"host only", &Config{Host: "db.example.com"}},
+		{"database only", &Config{Database: "hub"}},
+		{"connectionString without host", &Config{ConnectionString: "postgres:///hub"}},
+		{"connectionString without database", &Config{ConnectionString: "postgres://db.example.com"}},
+		{"connectionString unparseable", &Config{ConnectionString: "://not a url"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := nativeIDFromConfig(tc.cfg); err == nil {
+				t.Errorf("expected error for %q, got nil", tc.name)
+			}
+		})
+	}
+}
+
+// =============================================================================
 // helpers
 // =============================================================================
 

@@ -59,7 +59,10 @@ func TestList_AfterCreate(t *testing.T) {
 	// Native ID is derived from the Target's connection coordinates so
 	// it matches what Create returns (the harness's discovery flow
 	// captures Create's NativeID and waits for List to surface the same).
-	wantNative := nativeIDFromConfig(&Config{Dialect: "postgres", Host: pg.Host, Port: pg.Port, Database: pg.Database})
+	wantNative, err := nativeIDFromConfig(&Config{Dialect: "postgres", Host: pg.Host, Database: pg.Database})
+	if err != nil {
+		t.Fatalf("nativeIDFromConfig: %v", err)
+	}
 	if got := result.NativeIDs[0]; got != wantNative {
 		t.Errorf("NativeIDs[0]: got %q, want %q", got, wantNative)
 	}

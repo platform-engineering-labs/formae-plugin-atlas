@@ -43,7 +43,10 @@ func TestCreate_AppliesMigrations(t *testing.T) {
 	}
 	// NativeID is synthesized from the Target's DB coordinates so it
 	// matches what discovery would surface, not the user-supplied Label.
-	wantNative := nativeIDFromConfig(&Config{Dialect: "postgres", Host: pg.Host, Port: pg.Port, Database: pg.Database})
+	wantNative, err := nativeIDFromConfig(&Config{Dialect: "postgres", Host: pg.Host, Database: pg.Database})
+	if err != nil {
+		t.Fatalf("nativeIDFromConfig: %v", err)
+	}
 	if result.ProgressResult.NativeID != wantNative {
 		t.Errorf("NativeID: got %q, want %q (DSN-shaped synthetic)",
 			result.ProgressResult.NativeID, wantNative)

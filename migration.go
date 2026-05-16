@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"ariga.io/atlas-go-sdk/atlasexec"
@@ -91,10 +92,15 @@ func (p *Plugin) createMigration(ctx context.Context, req *resource.CreateReques
 	out.AppliedVersion = applied
 	outRaw, _ := json.Marshal(out)
 
+	nativeID, err := nativeIDFromConfig(cfg)
+	if err != nil {
+		return progressFailure(resource.OperationCreate,
+			resource.OperationErrorCodeInvalidRequest, err.Error())
+	}
 	return &resource.ProgressResult{
 		Operation:          resource.OperationCreate,
 		OperationStatus:    resource.OperationStatusSuccess,
-		NativeID:           nativeIDFromConfig(cfg),
+		NativeID:           nativeID,
 		ResourceProperties: outRaw,
 	}
 }
@@ -302,6 +308,13 @@ func readMigrationState(ctx context.Context, connURL string, hintSchema *string)
 // revisions table, or "" if the table doesn't exist in any schema.
 // Atlas creates the table on first migrate apply; absence means the
 // resource hasn't been Created yet (or was wiped out-of-band).
+//
+// v1 limitation: returns the first matching schema if more than one
+// `atlas_schema_revisions` table exists (multiple trackers per DB,
+// via differing `revisionsSchema` settings on separate Migration
+// resources). Multi-tracker discovery and disambiguation is tracked
+// as a v2 feature — see README "Known limitations". For now, use one
+// Target per tracker.
 func locateRevisionsSchema(ctx context.Context, db *sql.DB, hint *string) (string, error) {
 	if hint != nil && *hint != "" {
 		ok, err := tableExists(ctx, db, *hint)
@@ -429,10 +442,16 @@ func (p *Plugin) updateMigration(ctx context.Context, req *resource.UpdateReques
 	out := *desired
 	out.AppliedVersion = applied
 	outRaw, _ := json.Marshal(out)
+
+	nativeID, err := nativeIDFromConfig(cfg)
+	if err != nil {
+		return progressFailure(resource.OperationUpdate,
+			resource.OperationErrorCodeInvalidRequest, err.Error())
+	}
 	return &resource.ProgressResult{
 		Operation:          resource.OperationUpdate,
 		OperationStatus:    resource.OperationStatusSuccess,
-		NativeID:           nativeIDFromConfig(cfg),
+		NativeID:           nativeID,
 		ResourceProperties: outRaw,
 	}
 }
@@ -504,36 +523,56 @@ func (p *Plugin) listMigrations(ctx context.Context, req *resource.ListRequest) 
 		return &resource.ListResult{NativeIDs: []string{}}, nil
 	}
 
-	return &resource.ListResult{NativeIDs: []string{nativeIDFromConfig(cfg)}}, nil
+	nativeID, err := nativeIDFromConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("list nativeID: %w", err)
+	}
+	return &resource.ListResult{NativeIDs: []string{nativeID}}, nil
 }
 
 // nativeIDFromConfig returns a stable, observable-from-TargetConfig
 // identifier for a Migration. The "identity" of a migration resource is
-// the DB it operates on — host:port/database fully specifies that.
-// Both Create and List derive from the same data so discovery's
-// NativeID round-trip works without any plugin-side label persistence.
+// the DB it operates on — `<dialect>://<host>/<database>`. Both Create
+// and List derive from the same data so discovery's NativeID round-trip
+// works without any plugin-side label persistence.
 //
-// Form: postgres://<host>:<port>/<database> (DSN-shaped, sans credentials).
-// Reads as the actual connection URL the operator pointed at, so
-// `formae inventory | grep <host>` works.
-func nativeIDFromConfig(cfg *Config) string {
-	host := cfg.Host
-	if host == "" {
-		host = "unknown"
+// Port is deliberately excluded: it's a mutable ConfigFieldHint, and
+// pulling it into identity would force a resource replace every time
+// the upstream cluster's listener moves. ConnectionString takes
+// precedence over the structured fields when set — it's the canonical
+// operator-declared form and may carry settings the structured fields
+// don't expose.
+//
+// Errors when essential identity info (host + database, or a valid
+// connectionString containing both) can't be resolved. Better to
+// fail-fast at the boundary than emit a synthetic `unknown` that
+// collides with every other misconfigured Target.
+func nativeIDFromConfig(cfg *Config) (string, error) {
+	if cfg.ConnectionString != "" {
+		u, err := url.Parse(cfg.ConnectionString)
+		if err != nil {
+			return "", fmt.Errorf("nativeIDFromConfig: invalid connectionString %q: %w", cfg.ConnectionString, err)
+		}
+		host := u.Hostname()
+		db := strings.TrimPrefix(u.Path, "/")
+		if host == "" || db == "" {
+			return "", fmt.Errorf("nativeIDFromConfig: connectionString must specify host and database, got %q", cfg.ConnectionString)
+		}
+		scheme := u.Scheme
+		if scheme == "" {
+			scheme = "postgres"
+		}
+		return fmt.Sprintf("%s://%s/%s", scheme, host, db), nil
 	}
-	port := cfg.Port
-	if port == 0 {
-		port = 5432
-	}
-	db := cfg.Database
-	if db == "" {
-		db = "unknown"
+
+	if cfg.Host == "" || cfg.Database == "" {
+		return "", fmt.Errorf("nativeIDFromConfig: requires either connectionString or host+database, got host=%q database=%q", cfg.Host, cfg.Database)
 	}
 	dialect := cfg.Dialect
 	if dialect == "" {
 		dialect = "postgres"
 	}
-	return fmt.Sprintf("%s://%s:%d/%s", dialect, host, port, db)
+	return fmt.Sprintf("%s://%s/%s", dialect, cfg.Host, cfg.Database), nil
 }
 
 // =============================================================================

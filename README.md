@@ -286,6 +286,13 @@ formae apply --mode reconcile examples/basic/main.pkl
 ## Known limitations
 
 - **Postgres only.** `dialect` accepts `"postgres"` exclusively in v1.
+- **One Migration per DB.** Atlas supports multiple
+  `atlas_schema_revisions` trackers per database (via custom
+  `revisionsSchema`), but v1 assumes a single tracker — `List` returns
+  one NativeID per Target and `Read` picks the first revisions schema
+  it finds. Multi-tracker DBs collapse to whichever tracker
+  `information_schema` returns first. Use a separate `formae.Target`
+  per tracker until v2 supports per-schema discovery.
 - **No full destructive rollback.** The opt-in destructive Delete mode
   drops atlas's bookkeeping only, not user data. `atlas migrate down`
   to 0 as part of Delete is on the roadmap for ephemeral test/dev DBs

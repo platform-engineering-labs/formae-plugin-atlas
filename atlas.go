@@ -115,10 +115,8 @@ func (p *Plugin) RateLimit() model.RateLimitConfig {
 	}
 }
 
-// DiscoveryFilters returns nil — discovery is disabled for Atlas Targets
-// in v1. Migrations are declared, not discovered: there's no meaningful
-// "enumerate Migrations on this DB" semantics, and Targets default to
-// discoverable=false. See README §"Discovery" for the rationale.
+// DiscoveryFilters returns nil — atlas has no parent/child topology
+// where children need filtering out during discovery.
 func (p *Plugin) DiscoveryFilters() []model.MatchFilter {
 	return nil
 }
