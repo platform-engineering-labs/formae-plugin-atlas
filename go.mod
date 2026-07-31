@@ -3,14 +3,15 @@ module github.com/platform-engineering-labs/formae-plugin-atlas
 go 1.26.0
 
 require (
-	github.com/platform-engineering-labs/formae/pkg/model v0.1.23
+	ariga.io/atlas-go-sdk v0.7.2
+	github.com/lib/pq v1.12.3
+	github.com/platform-engineering-labs/formae/pkg/model v0.1.26
 	github.com/platform-engineering-labs/formae/pkg/plugin v0.2.1
 	github.com/platform-engineering-labs/formae/pkg/plugin-conformance-tests v0.2.5-0.20260515203601-ec66c57a6e68
 )
 
 require (
 	ariga.io/atlas v0.32.0 // indirect
-	ariga.io/atlas-go-sdk v0.7.2 // indirect
 	ergo.services/actor/statemachine v0.0.0-20251202053101-c0aa08b403e5 // indirect
 	ergo.services/ergo v1.999.320 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
@@ -52,7 +53,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7 // indirect
 	github.com/hashicorp/hcl/v2 v2.18.1 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
-	github.com/lib/pq v1.12.3 // indirect
 	github.com/lufia/plan9stats v0.0.0-20251013123823-9fd1530e3ec3 // indirect
 	github.com/lunixbochs/struc v0.0.0-20241101090106-8d528fa2c543 // indirect
 	github.com/mashiike/s3-setlock v0.2.0 // indirect
