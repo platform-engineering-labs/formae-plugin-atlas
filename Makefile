@@ -69,6 +69,7 @@ lint:
 ## verify-schema: Validate PKL schema files
 ## Checks that schema files are well-formed and follow formae conventions.
 verify-schema:
+	@mkdir -p schema/pkl && echo "$(PLUGIN_VERSION)" > schema/pkl/VERSION
 	$(GO) run github.com/platform-engineering-labs/formae/pkg/plugin/testutil/cmd/verify-schema --namespace $(PLUGIN_NAMESPACE) ./schema/pkl
 
 ## clean: Remove build artifacts

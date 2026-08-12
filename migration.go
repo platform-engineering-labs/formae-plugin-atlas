@@ -281,7 +281,7 @@ func readMigrationState(ctx context.Context, connURL string, hintSchema *string)
 	if err != nil {
 		return migrationState{}, fmt.Errorf("sql.Open: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	schema, err := locateRevisionsSchema(ctx, db, hintSchema)
 	if err != nil {
@@ -634,7 +634,7 @@ func dropRevisionsSchema(ctx context.Context, connURL string) error {
 	if err != nil {
 		return fmt.Errorf("sql.Open: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	schema, err := locateRevisionsSchema(ctx, db, nil)
 	if err != nil {
