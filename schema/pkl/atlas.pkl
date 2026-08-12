@@ -38,42 +38,55 @@ open class Config {
     /// MySQL / SQL Server expansion without schema breakage.
     /// (Immutable — changing dialect implies a different DB target.)
     @ConfigFieldHint { createOnly = true }
-    dialect: ("postgres")? = "postgres"
+    hidden dialect: ("postgres")? = "postgres"
 
     /// Network host. Typically a Resolvable from
     /// `AWS::RDS::DBCluster.res.endpointAddress`.
     /// (Immutable — pointing at a different host is a different DB.)
     @ConfigFieldHint { createOnly = true }
-    host: (String|formae.Resolvable)?
+    hidden host: (String|formae.Resolvable)?
 
     /// Network port. Typically a Resolvable from
     /// `AWS::RDS::DBCluster.res.endpointPort`. Mutable so that the
     /// upstream cluster can change its listener without forcing a
     /// migration-resource replace.
     @ConfigFieldHint { createOnly = false }
-    port: (Int|formae.Resolvable)?
+    hidden port: (Int|formae.Resolvable)?
 
     /// Database name (postgres database, mysql schema, etc.).
     /// (Immutable — switching DBs is a different target.)
     @ConfigFieldHint { createOnly = true }
-    database: String?
+    hidden database: String?
 
     /// Authentication credentials. See the `Credentials` subclasses for
     /// the supported shapes. Mutable to support credential rotation.
     @ConfigFieldHint { createOnly = false }
-    credentials: Credentials?
+    hidden credentials: Credentials?
 
     /// SSL/TLS mode. Aurora best practice is `verify-ca`; `verify-full`
     /// requires a known server hostname in the cert. Mutable.
     @ConfigFieldHint { createOnly = false }
-    sslMode: ("disable" | "require" | "verify-ca" | "verify-full")? = "verify-ca"
+    hidden sslMode: ("disable" | "require" | "verify-ca" | "verify-full")? = "verify-ca"
 
     /// Escape hatch: pre-composed connection string. When set, takes
     /// precedence over the structured fields above. For non-cloud DBs,
     /// sqlite, or ad-hoc connections that don't fit the structured model.
     /// Mutable — same rationale as `credentials`.
     @ConfigFieldHint { createOnly = false }
-    connectionString: (String|formae.Resolvable)?
+    hidden connectionString: (String|formae.Resolvable)?
+
+    // Output. The rendered key must match the name the schema extractor gives
+    // the ConfigFieldHint, which capitalizes the property. The agent looks a
+    // hint up by the config key exactly, so a lowercase key would leave every
+    // field with no hint and therefore treated as createOnly, turning a
+    // credential rotation into a target replace.
+    fixed Dialect: ("postgres")? = dialect
+    fixed Host: (String|formae.Resolvable)? = host
+    fixed Port: (Int|formae.Resolvable)? = port
+    fixed Database: String? = database
+    fixed Credentials: Credentials? = credentials
+    fixed SslMode: ("disable" | "require" | "verify-ca" | "verify-full")? = sslMode
+    fixed ConnectionString: (String|formae.Resolvable)? = connectionString
 }
 
 // =============================================================================
@@ -96,8 +109,12 @@ abstract class Credentials {
 class AwsRdsMasterCredentials extends Credentials {
     fixed type = "AwsRdsMaster"
 
-    /// Reference to the secret payload (the entire `secretString`).
-    /// Typically: `hubDbMasterSecret.res.secretString`
+    /// Reference to the whole secret payload, which the plugin parses.
+    /// Typically: `hubDbMasterSecret.res.secretValue`
+    ///
+    /// The agent resolves the reference live before every call, so rotating
+    /// the secret needs no agent restart, and the payload is stored as a
+    /// reference rather than a copy of the credentials.
     secret: String|formae.Resolvable
 }
 
@@ -112,9 +129,16 @@ class UsernamePasswordJsonCredentials extends Credentials {
 
 /// Separate username + password fields. Useful when neither value
 /// comes from a JSON-shaped secret (env vars, config files, etc.).
-/// Also the right shape for when `SecretResolvable.field(...)` lands
-/// in the AWS plugin — at that point users can wire individual fields
-/// directly instead of routing through a parsed JSON blob.
+///
+/// Also the shape to reach for when the values DO live in one JSON
+/// secret but you would rather bind them individually than have the
+/// plugin parse the blob. `.json(path)` navigates the resolved value,
+/// so each field resolves on its own:
+///
+///     credentials = new UsernamePasswordCredentials {
+///       username = dbSecret.res.secretValue.json("username")
+///       password = dbSecret.res.secretValue.json("password")
+///     }
 class UsernamePasswordCredentials extends Credentials {
     fixed type = "UsernamePassword"
 

@@ -13,13 +13,13 @@ import (
 // It's the shape of the JSON blob passed to the plugin in TargetConfig
 // on every CRUD request. Unmarshal from json.RawMessage via ParseConfig.
 type Config struct {
-	Dialect          string          `json:"dialect,omitempty"`
-	Host             string          `json:"host,omitempty"`
-	Port             int             `json:"port,omitempty"`
-	Database         string          `json:"database,omitempty"`
-	Credentials      json.RawMessage `json:"credentials,omitempty"`
-	SSLMode          string          `json:"sslMode,omitempty"`
-	ConnectionString string          `json:"connectionString,omitempty"`
+	Dialect          string          `json:"Dialect,omitempty"`
+	Host             string          `json:"Host,omitempty"`
+	Port             int             `json:"Port,omitempty"`
+	Database         string          `json:"Database,omitempty"`
+	Credentials      json.RawMessage `json:"Credentials,omitempty"`
+	SSLMode          string          `json:"SslMode,omitempty"`
+	ConnectionString string          `json:"ConnectionString,omitempty"`
 }
 
 // ParseConfig unmarshals the TargetConfig JSON blob into a Config struct.
